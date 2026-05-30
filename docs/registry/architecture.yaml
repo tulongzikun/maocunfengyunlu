@@ -30,7 +30,7 @@
 #   Superseded entries:     Grep pattern="status: superseded"
 
 version: 1
-last_updated: ""
+last_updated: "2026-05-30"
 
 # ─── STATE OWNERSHIP ─────────────────────────────────────────────────────────
 # Who is the authoritative owner of each piece of shared game state.
@@ -43,7 +43,47 @@ last_updated: ""
 # interface: how other systems access this state (read-only property, method call,
 #   signal, shared resource, etc.) — this is the contract other ADRs depend on.
 
-state_ownership: []
+state_ownership:
+  - state: game_save_data
+    status: active
+    owner_system: save-load-system
+    adr: docs/architecture/adr-0002-save-load-serialization-format.md
+    interface: "SaveManager.collect_save_state() → GameState Resource; SaveManager.restore_from_save(GameState) → void; FileAccess for verification only"
+    write_access: save-load-system-only
+    referenced_by:
+      - docs/architecture/adr-0002-save-load-serialization-format.md
+    added: 2026-05-30
+    revised: ""
+  - state: node_graph_data
+    status: active
+    owner_system: scene-world-manager
+    adr: docs/architecture/adr-0003-node-graph-data-model.md
+    interface: "SceneManager.get_node(id), get_adjacent_nodes(id), get_edge(from,to), get_nodes_with_tag(tag), is_node_accessible(id) — all read-only queries"
+    write_access: scene-world-manager-only
+    referenced_by:
+      - docs/architecture/adr-0003-node-graph-data-model.md
+    added: 2026-05-30
+    revised: ""
+  - state: time_loop_state
+    status: active
+    owner_system: time-loop-system
+    adr: docs/architecture/adr-0004-time-loop-state-machine.md
+    interface: "TimeManager.get_time_remaining() (read-only int), TimeManager.get_loop_count() (read-only int), TimeManager.get_state() (read-only enum), TimeManager.can_afford(units) (read-only bool)"
+    write_access: time-loop-system-only
+    referenced_by:
+      - docs/architecture/adr-0004-time-loop-state-machine.md
+    added: 2026-05-30
+    revised: ""
+  - state: npc_relationship_data
+    status: active
+    owner_system: relationship-system
+    adr: docs/architecture/adr-0005-relationship-data-model.md
+    interface: "RelationshipManager.get_warmth(id), get_affection(id), get_memory_tier(id), is_recruited(id), is_recruitable(id) — all read-only; add_affection(id, amount, source) — mutation through EventBus consumers only"
+    write_access: relationship-system-only
+    referenced_by:
+      - docs/architecture/adr-0005-relationship-data-model.md
+    added: 2026-05-30
+    revised: ""
 
 # Example:
 #
@@ -71,7 +111,36 @@ state_ownership: []
 #
 # pattern options: signal | direct_call | event_bus | shared_resource | rpc | none
 
-interfaces: []
+interfaces:
+  - contract: eventbus_signal_routing
+    status: active
+    pattern: event_bus
+    producer: any module (via EventBus.emit)
+    consumers:
+      - all modules (via EventBus.connect_to)
+    adr: docs/architecture/adr-0001-event-bus-architecture.md
+    signal_signature: "connect_to(signal_name: String, callable: Callable, priority: int = PRIORITY_NORMAL) → emit(signal_name: String, ...args: Variant) → disconnect_from(signal_name: String, callable: Callable)"
+    referenced_by: []
+    added: 2026-05-30
+    revised: ""
+  - contract: per_manager_save_load
+    status: active
+    pattern: direct_call
+    producer: save-load-system (SaveManager orchestrates)
+    consumers:
+      - relationship-system
+      - combat-system
+      - world-system
+      - traces-system
+      - progression-system
+      - tutorial-system
+      - economy-system
+      - schedule-system
+    adr: docs/architecture/adr-0002-save-load-serialization-format.md
+    signal_signature: "collect_save_state() -> Resource; restore_from_save(state: Resource) -> void"
+    referenced_by: []
+    added: 2026-05-30
+    revised: ""
 
 # Example:
 #
@@ -100,7 +169,16 @@ interfaces: []
 # Register a budget when an ADR explicitly claims a frame time allocation.
 # The registry lets /architecture-review verify the total doesn't exceed the target.
 
-performance_budgets: []
+performance_budgets:
+  - system: save-load
+    status: active
+    budget_ms: 100.0
+    adr: docs/architecture/adr-0002-save-load-serialization-format.md
+    notes: "Auto-save must complete within 100ms during loop collapse whiteout sequence"
+    referenced_by:
+      - docs/architecture/adr-0002-save-load-serialization-format.md
+    added: 2026-05-30
+    revised: ""
 
 # Example:
 #
@@ -131,7 +209,51 @@ performance_budgets: []
 # Register an API decision when the choice is non-obvious and other ADRs might
 # make a different choice for the same purpose without knowing this was decided.
 
-api_decisions: []
+api_decisions:
+  - purpose: cross_system_signal_dispatch
+    status: active
+    api: Callable.callv() with sorted Array[Subscriber]
+    not: "Godot native Signal.emit() — connection-order FIFO, no priority mechanism"
+    adr: docs/architecture/adr-0001-event-bus-architecture.md
+    reason: "Priority-based execution order required for signals like loop_start where convert_warmth() must read state before reset_affection() clears it"
+    referenced_by: []
+    added: 2026-05-30
+    revised: ""
+  - purpose: save_file_format
+    status: active
+    api: "ResourceSaver.save() / ResourceLoader.load() with .tres GameState Resource"
+    not: "JSON with manual serialization — loses typed Resource system; binary .res — loses debug readability"
+    adr: docs/architecture/adr-0002-save-load-serialization-format.md
+    reason: ".tres text format is debuggable in any editor during development while retaining Godot's typed Resource serialization"
+    referenced_by: []
+    added: 2026-05-30
+    revised: ""
+  - purpose: time_consumption_protocol
+    status: active
+    api: "EventBus request/validate/deduct/notify: time_cost_requested(units) → TimeManager validates → time_advanced(units, remaining)"
+    not: "Direct time_remaining mutation by action systems — bypasses validation"
+    adr: docs/architecture/adr-0004-time-loop-state-machine.md
+    reason: "Single choke point for time validation prevents double-counting, negative time, and time consumption during collapse"
+    referenced_by: []
+    added: 2026-05-30
+    revised: ""
+    status: active
+    api: "EventBus request/validate/deduct/notify: time_cost_requested(units) → TimeManager validates → time_advanced(units, remaining)"
+    not: "Direct time_remaining mutation by action systems — bypasses validation"
+    adr: docs/architecture/adr-0004-time-loop-state-machine.md
+    reason: "Single choke point for time validation prevents double-counting, negative time, and time consumption during collapse"
+    referenced_by: []
+    added: 2026-05-30
+    revised: ""
+  - purpose: settings_persistence
+    status: active
+    api: ConfigFile (.ini format)
+    not: "Store settings in GameState .tres — settings should survive save deletion"
+    adr: docs/architecture/adr-0002-save-load-serialization-format.md
+    reason: "Settings (volume, accessibility, input remapping) are user preferences, not game progress — they must persist even when save files are deleted"
+    referenced_by: []
+    added: 2026-05-30
+    revised: ""
 
 # Example:
 #

@@ -1,4 +1,5 @@
 # === IDE and Editor ===
+.github/
 .vs/
 .vscode/settings.json
 .idea/
